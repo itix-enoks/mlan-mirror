@@ -1,85 +1,97 @@
-%% Project 2: HE (802.11ax) vs. VHT (802.11ac) System Simulation
+%% Project 2: HE-MU (802.11ax OFDMA) vs. VHT (802.11ac Single-User)
 clear; clc; close all;
 
-%% 1. Parameters & Hypothesis
-% Hypothesis: 802.11ax (System A) outperforms 802.11ac (System B) in dense, 
-% high-interference scenarios, but OFDMA overhead may reduce efficiency 
-% for single-user small-packet traffic.
+%% 1. Configuration
+cbw     = 'CBW20';
+fs      = wlanSampleRate('CBW20');
+psduLen = 1000;   % bytes per user
 
-mcsLevels = [0, 4, 8]; % Using MCS 8 to avoid the VHT 20MHz/Nss1 error
-snrRange = 0:5:35;      
-numPackets = 15;        % Conservative for execution speed
-cbw = 'CBW20';
+% ---- System A: 802.11ax HE-MU (OFDMA) ----
+% Use allocation index '00001101' → 3 users in 20 MHz (3x26-tone RUs).
+% User count is derived from how many User cells the object creates.
+cfgMU    = wlanHEMUConfig('00001101');
+numUsers = length(cfgMU.User);   % correct way to get user count
+fprintf('HE-MU allocation ''00001101'' -> %d users\n', numUsers);
 
-% User Profiles [cite: 4]
-userTraffic = {'Voice', 'Video', 'Data'};
-numUsers = length(userTraffic);
-userSNRs = [12, 22, 32]; % Distinct SNR per user [cite: 4]
+userSNRs = linspace(12, 32, numUsers);
 
-%% 2. PHY Simulation with TGax Channel
-fprintf('Simulating PHY Layer (TGax Model-B)...\n');
-
-perAX = zeros(length(mcsLevels), length(snrRange));
-perAC = zeros(length(mcsLevels), length(snrRange));
-
-% Setup TGax Channel 
-tgaxCh = wlanTGaxChannel('DelayProfile', 'Model-B', 'SampleRate', 20e6, ...
-    'ChannelBandwidth', cbw, 'NumTransmitAntennas', 1, 'NumReceiveAntennas', 1);
-
-for m = 1:length(mcsLevels)
-    % System A Config (HE) 
-    cfgAX = wlanHESUConfig('ChannelBandwidth', cbw, 'MCS', mcsLevels(m));
-    
-    % System B Config (VHT) 
-    cfgAC = wlanVHTConfig('ChannelBandwidth', cbw, 'MCS', mcsLevels(m));
-    
-    for s = 1:length(snrRange)
-        errAX = 0; errAC = 0;
-        
-        for p = 1:numPackets
-            % --- 802.11ax Path ---
-            bits = randi([0 1], 1000, 1);
-            txAX = wlanWaveformGenerator(bits, cfgAX);
-            rxAX = tgaxCh(txAX); % Apply realistic wireless channel [cite: 1]
-            rxAX = awgn(rxAX, snrRange(s));
-            
-            % Simple Threshold Receiver (Conservative model)
-            if snrRange(s) < (m * 4 + 2), errAX = errAX + 1; end
-            
-            % --- 802.11ac Path ---
-            txAC = wlanWaveformGenerator(bits, cfgAC);
-            rxAC = awgn(txAC, snrRange(s)); % VHT comparison
-            if snrRange(s) < (m * 4 + 5), errAC = errAC + 1; end
-        end
-        perAX(m, s) = errAX / numPackets;
-        perAC(m, s) = errAC / numPackets;
-    end
+for u = 1:numUsers
+    cfgMU.User{u}.MCS        = 4;
+    cfgMU.User{u}.APEPLength = psduLen;
 end
 
-%% 3. System-Level Performance Metrics
-% Calculating Throughput and Jain's Fairness Index
-userThroughputs = zeros(1, numUsers);
-for i = 1:numUsers
-    % Interpolate PER based on user-specific SNR [cite: 4]
-    pErr = interp1(snrRange, perAX(2, :), userSNRs(i), 'linear', 1);
-    userThroughputs(i) = 100 * (1 - pErr) * (1/numUsers); % Simplified Mbps
+% ---- System B: 802.11ac VHT Single-User ----
+cfgAC = wlanVHTConfig('ChannelBandwidth', cbw, 'MCS', 4, 'APEPLength', psduLen);
+
+%% 2. Waveform Generation
+bits = cell(1, numUsers);
+for u = 1:numUsers
+    bits{u} = randi([0 1], psduLen * 8, 1);
+end
+txAX = wlanWaveformGenerator(bits, cfgMU);
+txAC = wlanWaveformGenerator(bits{1}, cfgAC);
+
+fprintf('HE-MU waveform : %d samples\n', length(txAX));
+fprintf('VHT   waveform : %d samples\n', length(txAC));
+
+%% 3. Channel Modelling (TGax Model-B)
+tgaxCh = wlanTGaxChannel( ...
+    'DelayProfile',            'Model-B', ...
+    'SampleRate',              fs, ...
+    'ChannelBandwidth',        cbw, ...
+    'NumTransmitAntennas',     1, ...
+    'NumReceiveAntennas',      1, ...
+    'TransmitReceiveDistance', 10);
+
+reset(tgaxCh);  rxAX = tgaxCh(txAX);
+reset(tgaxCh);  rxAC = tgaxCh(txAC);
+
+%% 4. PER-based Throughput
+% Sigmoid PER model around MCS-4 threshold (~18 dB).
+% Replace with measured PER curves from your PHY simulation.
+mcs4_threshold = 18;   % dB
+slotTime       = 1e-3; % 1 ms TXOP
+
+userThroughputs_AX = zeros(1, numUsers);
+userThroughputs_AC = zeros(1, numUsers);
+
+fprintf('\n%-6s %-10s %-8s\n', 'User', 'SNR (dB)', 'PER');
+for u = 1:numUsers
+    snr_u  = userSNRs(u);
+    per_u  = 1 / (1 + exp(snr_u - mcs4_threshold));
+    tput_u = (psduLen * 8 * (1 - per_u)) / slotTime;
+    userThroughputs_AX(u) = tput_u;
+    userThroughputs_AC(u) = tput_u;
+    fprintf('%-6d %-10.1f %-8.4f\n', u, snr_u, per_u);
 end
 
-% Jain's Fairness Index
-jainIndex = (sum(userThroughputs)^2) / (numUsers * sum(userThroughputs.^2));
+% MAC scheduling: AX serves all users per slot; AC round-robins
+userThroughputs_AC = userThroughputs_AC / numUsers;
 
-%% 4. Results & Critical Thinking
-fprintf('\n--- Performance Metrics ---\n');
-fprintf('Jain''s Fairness Index: %.3f\n', jainIndex);
-fprintf('Total Network Throughput: %.2f Mbps\n', sum(userThroughputs));
+%% 5. Metrics
+totalAX = sum(userThroughputs_AX);
+totalAC = sum(userThroughputs_AC);
+jainAX  = sum(userThroughputs_AX)^2 / (numUsers * sum(userThroughputs_AX.^2));
+jainAC  = sum(userThroughputs_AC)^2 / (numUsers * sum(userThroughputs_AC.^2));
+
+fprintf('\n%-35s %12s %12s\n', 'Metric', 'AX (OFDMA)', 'AC (SU-RR)');
+fprintf('%s\n', repmat('-',1,60));
+fprintf('%-35s %12.2f %12.2f\n', 'Total throughput (Mbps)', totalAX/1e6, totalAC/1e6);
+fprintf('%-35s %12.4f %12.4f\n', 'Jains Fairness Index',    jainAX,      jainAC);
+
+%% 6. Plots
+figure;
+bar(1:numUsers, [userThroughputs_AX; userThroughputs_AC]'/1e6);
+xlabel('User'); ylabel('Throughput (Mbps)');
+title('Per-User Throughput: 802.11ax OFDMA vs 802.11ac RR');
+legend('802.11ax (HE-MU)','802.11ac (VHT RR)'); grid on;
 
 figure;
 subplot(1,2,1);
-plot(snrRange, perAX(2,:), '-o', snrRange, perAC(2,:), '--x');
-title('PER vs SNR (MCS 4)'); xlabel('SNR (dB)'); ylabel('Packet Error Rate');
-legend('802.11ax (System A)', '802.11ac (System B)'); grid on;
-
+bar([totalAX totalAC]/1e6);
+set(gca,'XTickLabel',{'802.11ax','802.11ac'}); grid on;
+ylabel('Mbps'); title('Total Throughput');
 subplot(1,2,2);
-bar(userThroughputs);
-set(gca, 'XTickLabel', userTraffic);
-title('Individual User Throughput'); ylabel('Mbps');
+bar([jainAX jainAC]);
+set(gca,'XTickLabel',{'802.11ax','802.11ac'}); grid on;
+ylim([0 1]); title('Jains Fairness Index');
