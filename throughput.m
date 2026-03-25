@@ -27,7 +27,7 @@ fixed_payload              = payload_len{1};   % 1024 bytes
 
 %% Setup channel
 tgax = genTGax(chan_bandwidth, delay_profile, tx_rx_distance, ...
-               transmission_dir, large_scale_fading_effects);
+               trans_dir{1}, large_scale_fading_effects);
 
 %% Sweep guard intervals
 gi_ac_labels = {'0.4us', '0.8us'};
@@ -67,14 +67,14 @@ subplot(1,2,1);
 bar(1:length(guard_i), tp_ac/1e6, 'r');
 set(gca, 'XTick', 1:length(guard_i), 'XTickLabel', gi_ac_labels);
 ylabel('Throughput (Mbps)');
-title('802.11ac — Guard Interval');
+title('802.11ac');
 grid on;
 
 subplot(1,2,2);
 bar(1:length(gi_ax_values), tp_ax/1e6, 'b');
 set(gca, 'XTick', 1:length(gi_ax_values), 'XTickLabel', gi_ax_labels);
 ylabel('Throughput (Mbps)');
-title('802.11ax — Guard Interval');
+title('802.11ax');
 grid on;
 
 sgtitle(sprintf('Throughput vs Guard Interval (MCS=%d, SNR=%ddB, %s)', ...
