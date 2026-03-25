@@ -12,20 +12,24 @@
 %  Jain's Fairness Index:
 %    JFI = ( sum(x_i) )^2  /  ( N * sum(x_i^2) )   in [1/N, 1]
 %    Computed on per-user throughput so it captures scheduling fairness.
-clear; clc; close all;
+%clear; clc; close all;
 %% =========================================================================
 %% 1. TRAFFIC PROFILES  (identical to multiuser_system.m)
 % =========================================================================
-TRAFFIC(1).name    = 'Video';
-TRAFFIC(1).payload = 1024;
-TRAFFIC(1).mcs_ac  = 7;
-TRAFFIC(1).mcs_ax  = 9;
-TRAFFIC(1).snr     = 28;
-TRAFFIC(2).name    = 'Voice';
-TRAFFIC(2).payload = 200;
-TRAFFIC(2).mcs_ac  = 3;
-TRAFFIC(2).mcs_ax  = 4;
-TRAFFIC(2).snr     = 18;
+%% 1. TRAFFIC PROFILES - SET A
+N_USERS = 4;
+
+% User 1: Large Video
+TRAFFIC(1).name = 'Video'; TRAFFIC(1).payload = 1500; TRAFFIC(1).mcs_ac = 8; TRAFFIC(1).mcs_ax = 10; TRAFFIC(1).snr = 30;
+
+% User 2: Small Voice
+TRAFFIC(2).name = 'Voice'; TRAFFIC(2).payload = 128;  TRAFFIC(2).mcs_ac = 4; TRAFFIC(2).mcs_ax = 5;  TRAFFIC(2).snr = 25;
+
+% User 3: Large Video
+TRAFFIC(3).name = 'Video'; TRAFFIC(3).payload = 1500; TRAFFIC(3).mcs_ac = 8; TRAFFIC(3).mcs_ax = 10; TRAFFIC(3).snr = 30;
+
+% User 4: Small Voice
+TRAFFIC(4).name = 'Voice'; TRAFFIC(4).payload = 128;  TRAFFIC(4).mcs_ac = 4; TRAFFIC(4).mcs_ax = 5;  TRAFFIC(4).snr = 25;
 %% =========================================================================
 %% 2. SIMULATION PARAMETERS
 % =========================================================================
@@ -101,23 +105,23 @@ end
 tp_ac_user  = bits_ac ./ (numPackets * slot_dur_ac * N_USERS);
 tp_ac_total = sum(bits_ac) / (numPackets * sum(slot_dur_ac));
 %% =========================================================================
-%% 4. 802.11ax — HE-SU per user, OFDMA time model
+%% 4. 802.11ax — HE-MU per user, OFDMA time model
 % =========================================================================
 fprintf('\n--- 802.11ax simulation ---\n');
 cfg_ax_users = cell(1, N_USERS);
 slot_dur_ax  = zeros(1, N_USERS);
 bits_ax      = zeros(1, N_USERS);
+psdu_ax      = zeros(1, N_USERS);
 for u = 1:N_USERS
-    cfg_ax_users{u} = wlanHESUConfig( ...
-        "ChannelBandwidth",    cbw,             ...
-        "MCS",                 users(u).mcs_ax, ...
-        "ChannelCoding",       chan_coding,      ...
-        "APEPLength",          users(u).payload, ...
-        "NumTransmitAntennas", 1,               ...
-        "NumSpaceTimeStreams",  1);
+    cfg_ax_users{u}                        = wlanHEMUConfig(112);
+    cfg_ax_users{u}.NumTransmitAntennas    = 1;
+    cfg_ax_users{u}.User{1}.MCS           = users(u).mcs_ax;
+    cfg_ax_users{u}.User{1}.ChannelCoding = chan_coding;
+    cfg_ax_users{u}.User{1}.APEPLength    = users(u).payload;
+    tmp_psdu = cfg_ax_users{u}.getPSDULength; psdu_ax(u) = tmp_psdu(1);
     fs_u = wlanSampleRate(cfg_ax_users{u});
     ref  = wlanWaveformGenerator( ...
-               randi([0 1], cfg_ax_users{u}.getPSDULength*8, 1), cfg_ax_users{u});
+               randi([0 1], psdu_ax(u)*8, 1), cfg_ax_users{u});
     slot_dur_ax(u) = size(ref, 1) / fs_u;
 end
 ofdma_slot = max(slot_dur_ax);
@@ -125,42 +129,36 @@ for pkt = 1:numPackets
     for u = 1:N_USERS
         cfg_u    = cfg_ax_users{u};
         noiseVar = snrToNoiseVar(users(u).snr);
-        payload = randi([0 1], cfg_u.getPSDULength * 8, 1);
+        payload = randi([0 1], psdu_ax(u) * 8, 1);
         tx      = wlanWaveformGenerator(payload, cfg_u);
         reset(tgax_usr{u});
         rx = awgn(tgax_usr{u}(tx), users(u).snr, 'measured');
         ind       = wlanFieldIndices(cfg_u);
-        info      = wlanHEOFDMInfo('HE-Data', cfg_u);
+        info      = wlanHEOFDMInfo('HE-Data', cfg_u, 1);
         rxLTF     = rx(ind.HELTF(1):ind.HELTF(2), :);
-        demodLTF  = wlanHEDemodulate(rxLTF, 'HE-LTF', cfg_u);
-        chanEst   = wlanHELTFChannelEstimate(demodLTF, cfg_u);
+        demodLTF  = wlanHEDemodulate(rxLTF, 'HE-LTF', cfg_u, 1);
+        chanEst   = wlanHELTFChannelEstimate(demodLTF, cfg_u, 1);
         rxData    = rx(ind.HEData(1):ind.HEData(2), :);
-        demodData = wlanHEDemodulate(rxData, 'HE-Data', cfg_u);
+        demodData = wlanHEDemodulate(rxData, 'HE-Data', cfg_u, 1);
         chanEstData  = chanEst(info.DataIndices, :, :);
         [eqSym, csi] = wlanHEEqualize( ...
-            demodData(info.DataIndices,:,:), chanEstData, noiseVar, cfg_u, 'HE-Data');
-        rxBits = wlanHEDataBitRecover(eqSym, noiseVar, csi, cfg_u);
+            demodData(info.DataIndices,:,:), chanEstData, noiseVar, cfg_u, 'HE-Data', 1);
+        rxBits = wlanHEDataBitRecover(eqSym, noiseVar, csi, cfg_u, 1);
         if ~any(payload ~= rxBits)
-            bits_ax(u) = bits_ax(u) + cfg_u.getPSDULength * 8;
+            bits_ax(u) = bits_ax(u) + psdu_ax(u) * 8;
         end
     end
 end
 for u = 1:N_USERS
     fprintf('  User %d (%s, %ddB): %d/%d pkts OK\n', ...
         u, users(u).type, users(u).snr, ...
-        round(bits_ax(u)/(cfg_ax_users{u}.getPSDULength*8)), numPackets);
+        round(bits_ax(u)/(psdu_ax(u)*8)), numPackets);
 end
 total_time_ax = numPackets * ofdma_slot;
 tp_ax_user    = bits_ax / total_time_ax;
 tp_ax_total   = sum(bits_ax) / total_time_ax;
 %% =========================================================================
 %% 5. JAIN'S FAIRNESS INDEX
-%
-%  Network-level JFI computed on per-user throughput vector.
-%  Also compute the "fairness contribution" of each user: how much closer
-%  to or farther from 1.0 that user pushes the index relative to a
-%  hypothetical equal allocation — expressed as the normalised throughput
-%  share  x_i / mean(x)  (1.0 = perfectly fair share).
 % =========================================================================
 jfi_ac = jainFairness(tp_ac_user);
 jfi_ax = jainFairness(tp_ax_user);
@@ -172,19 +170,6 @@ fprintf('  802.11ac: %.4f\n', jfi_ac);
 fprintf('  802.11ax: %.4f\n', jfi_ax);
 %% =========================================================================
 %% 6. SPECTRAL EFFICIENCY
-%
-%  SE_network [bps/Hz] = total_throughput / BW_HZ
-%
-%  Per-user SE:
-%    802.11ac : user occupies full BW_HZ but only 1/N of the time
-%               → SE_u = tp_ac_user(u) / BW_HZ
-%    802.11ax : user occupies BW_HZ/N_USERS sub-band simultaneously
-%               → SE_u = tp_ax_user(u) / (BW_HZ / N_USERS)
-%
-%  This correctly reflects that 802.11ax allocates a narrower sub-band
-%  per user but uses it 100% of the time, whereas 802.11ac uses the full
-%  band but only 1/N of the time — the per-user SE comparison shows which
-%  standard uses its allocated spectrum more efficiently per user.
 % =========================================================================
 se_ac_net  = tp_ac_total / BW_HZ;                      % bps/Hz network
 se_ax_net  = tp_ax_total / BW_HZ;
@@ -194,52 +179,62 @@ fprintf('\nSpectral Efficiency:\n');
 fprintf('  802.11ac network: %.4f bps/Hz\n', se_ac_net);
 fprintf('  802.11ax network: %.4f bps/Hz\n', se_ax_net);
 %% =========================================================================
-%% 7. PLOTS
-% =========================================================================
+%% 7. PLOTS (Individual Files)
+%  Replaces subplots with individual figures for separate saving.
+%% =========================================================================
 colors_ac = [0.85 0.25 0.25];
 colors_ax = [0.20 0.45 0.85];
-xlabels = arrayfun(@(u) sprintf('User %d\n%s/%ddB', ...
-    u, users(u).type, users(u).snr), 1:N_USERS, 'UniformOutput', false);
-figure('Name','Fairness & Spectral Efficiency', 'Position',[80 80 1000 700]);
-%% --- Row 1, Col 1: Network-level JFI ------------------------------------
-subplot(2, 2, 1);
+type_count_lg = 0; type_count_sm = 0;
+xlabels = cell(1, N_USERS);
+for u = 1:N_USERS
+    if strcmp(users(u).type, 'Video')
+        type_count_lg = type_count_lg + 1;
+        xlabels{u} = sprintf('Large-Pkt %d', type_count_lg);
+    else
+        type_count_sm = type_count_sm + 1;
+        xlabels{u} = sprintf('Small-Pkt %d', type_count_sm);
+    end
+end
+
+% --- Plot 1: Network-level JFI ---
+figure('Name','Network_JFI', 'Position',[100 100 600 500]);
 jfi_vals = [jfi_ac, jfi_ax];
 b1 = bar([1 2], jfi_vals, 0.45);
 b1.FaceColor = 'flat';
 b1.CData(1,:) = colors_ac;
 b1.CData(2,:) = colors_ax;
-yline(1.0, 'k--', 'Perfect Fairness (1.0)', ...
-    'LabelHorizontalAlignment','left', 'FontSize', 8);
-set(gca, 'XTick',[1 2], 'XTickLabel',{'802.11ac','802.11ax'}, 'FontSize',10);
+set(gca, 'XTick',[1 2], 'XTickLabel',{'802.11ac','802.11ax'}, 'FontSize',11);
 ylabel('Jain''s Fairness Index');
 title('Network Jain''s Fairness Index');
-ylim([0, 1.25]);
-grid on; box on;
+ylim([0, 1.2]); grid on; box on;
 for k = 1:2
     text(k, jfi_vals(k) + 0.04, sprintf('%.3f', jfi_vals(k)), ...
-        'HorizontalAlignment','center','FontSize',11,'FontWeight','bold');
+        'HorizontalAlignment','center','FontSize',12,'FontWeight','bold');
 end
-%% --- Row 1, Col 2: Per-user normalised throughput share -----------------
-subplot(2, 2, 2);
+saveas(gcf, 'figures/jain_fairness_index.png');
+
+% --- Plot 2: Per-user normalised throughput share ---
+figure('Name','User_Fairness', 'Position',[150 150 800 500]);
 norm_vals = [norm_share_ac(:), norm_share_ax(:)];
 b2 = bar(1:N_USERS, norm_vals, 0.72);
 b2(1).FaceColor = colors_ac;
 b2(2).FaceColor = colors_ax;
-yline(1.0, 'k--', 'Fair share', 'FontSize', 8);
-set(gca,'XTick',1:N_USERS,'XTickLabel',xlabels,'FontSize',9);
-ylabel('Normalised Throughput Share  (1 = fair)');
+set(gca,'XTick',1:N_USERS,'XTickLabel',xlabels,'FontSize',10);
+ylabel('Normalised Throughput Share');
 title('Per-User Fairness Contribution');
 legend('802.11ac','802.11ax','Location','northeast');
 grid on; box on;
 barAnnotate(norm_vals, N_USERS, 2);
-%% --- Row 2, Col 1: Network Spectral Efficiency ---------------------------
-subplot(2, 2, 3);
+saveas(gcf, 'figures/user_fairness_contribution.png');
+
+% --- Plot 3: Network Spectral Efficiency ---
+figure('Name','Network_SE', 'Position',[200 200 600 500]);
 se_net_vals = [se_ac_net, se_ax_net];
 b3 = bar([1 2], se_net_vals, 0.45);
 b3.FaceColor = 'flat';
 b3.CData(1,:) = colors_ac;
 b3.CData(2,:) = colors_ax;
-set(gca,'XTick',[1 2],'XTickLabel',{'802.11ac','802.11ax'},'FontSize',10);
+set(gca,'XTick',[1 2],'XTickLabel',{'802.11ac','802.11ax'},'FontSize',11);
 ylabel('Spectral Efficiency (bps/Hz)');
 title('Network Spectral Efficiency');
 ylim([0, max(se_net_vals)*1.35]);
@@ -247,24 +242,23 @@ grid on; box on;
 for k = 1:2
     text(k, se_net_vals(k)+max(se_net_vals)*0.05, ...
         sprintf('%.4f', se_net_vals(k)), ...
-        'HorizontalAlignment','center','FontSize',10,'FontWeight','bold');
+        'HorizontalAlignment','center','FontSize',11,'FontWeight','bold');
 end
-%% --- Row 2, Col 2: Per-user Spectral Efficiency --------------------------
-subplot(2, 2, 4);
+saveas(gcf, 'figures/network_spectral_efficiency.png');
+
+% --- Plot 4: Per-user Spectral Efficiency ---
+figure('Name','User_SE', 'Position',[250 250 800 500]);
 se_user_vals = [se_ac_user(:), se_ax_user(:)];
 b4 = bar(1:N_USERS, se_user_vals, 0.72);
 b4(1).FaceColor = colors_ac;
 b4(2).FaceColor = colors_ax;
-set(gca,'XTick',1:N_USERS,'XTickLabel',xlabels,'FontSize',9);
+set(gca,'XTick',1:N_USERS,'XTickLabel',xlabels,'FontSize',10);
 ylabel('SE (bps/Hz)');
-title({'Per-User Spectral Efficiency'; ...
-       '{\itac: full BW time-shared  |  ax: sub-band always-on}'});
-legend('802.11ac (80 MHz shared)','802.11ax (20 MHz dedicated)', ...
-       'Location','northeast');
+title({'Per-User Spectral Efficiency'; 'ac: 80MHz shared | ax: 20MHz dedicated'});
+legend('802.11ac (TDMA)','802.11ax (OFDMA)','Location','northeast');
 grid on; box on;
 barAnnotate(se_user_vals, N_USERS, 2);
-sgtitle(sprintf('Fairness & Spectral Efficiency  |  %s  |  CBW80  |  LDPC  |  %d Users', ...
-    delay_profile, N_USERS), 'FontWeight','bold');
+saveas(gcf, 'figures/user_spectral_efficiency.png');
 %% =========================================================================
 %% LOCAL FUNCTIONS
 % =========================================================================

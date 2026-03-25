@@ -1,7 +1,7 @@
 %% System-Level Throughput: 802.11ac vs 802.11ax
 %  Fixed 4-user scenario with heterogeneous traffic and per-user SNR.
 %  Plots: (1) Total network throughput, (2) Individual user throughput.
-clear; clc; close all;
+%clear; clc; close all;
 
 %% =========================================================================
 %% 1. TRAFFIC PROFILES
@@ -202,76 +202,40 @@ tp_ax_user    = bits_ax / total_time_ax;       % per-user bps
 tp_ax_total   = sum(bits_ax) / total_time_ax;  % aggregate bps
 
 %% =========================================================================
-%% 5. PLOTS
-% =========================================================================
+%% 5. PLOTS (Individual Files)
+%% =========================================================================
 colors_ac = [0.85 0.25 0.25];
 colors_ax = [0.20 0.45 0.85];
-
 xlabels = arrayfun(@(u) sprintf('User %d\n%s / %ddB', ...
     u, users(u).type, users(u).snr), 1:N_USERS, 'UniformOutput', false);
 
-figure('Name','System-Level Throughput', 'Position',[100 100 950 460]);
-
-%% --- Plot 1: Total Network Throughput ------------------------------------
-subplot(1, 2, 1);
-
+% --- Plot 1: Total Network Throughput ---
+figure('Name','Total_Network_Throughput');
 total_vals = [tp_ac_total, tp_ax_total] / 1e6;
 b1 = bar([1 2], total_vals, 0.45);
 b1.FaceColor = 'flat';
-b1.CData(1,:) = colors_ac;
-b1.CData(2,:) = colors_ax;
-
-set(gca, 'XTick', [1 2], ...
-    'XTickLabel', {'802.11ac','802.11ax'}, 'FontSize', 11);
+b1.CData(1,:) = colors_ac; b1.CData(2,:) = colors_ax;
+set(gca, 'XTick', [1 2], 'XTickLabel', {'802.11ac','802.11ax'}, 'FontSize', 11);
 ylabel('Total Network Throughput (Mbps)');
 title('Total Network Throughput');
-ylim([0, max(total_vals) * 1.30]);
-grid on; box on;
-
-% Value labels on bars
+grid on;
 for k = 1:2
-    text(k, total_vals(k) + max(total_vals)*0.03, ...
-        sprintf('%.1f Mbps', total_vals(k)), ...
-        'HorizontalAlignment','center','FontSize',11,'FontWeight','bold');
+    text(k, total_vals(k) + max(total_vals)*0.03, sprintf('%.1f Mbps', total_vals(k)), ...
+        'HorizontalAlignment','center','FontWeight','bold');
 end
+saveas(gcf, 'figures/total_network_throughput.png');
 
-% Gain annotation
-gain = (tp_ax_total - tp_ac_total) / tp_ac_total * 100;
-annotation_str = sprintf('ax gain: %+.0f%%', gain);
-text(1.5, max(total_vals)*1.18, annotation_str, ...
-    'HorizontalAlignment','center','FontSize',10,'Color',[0 0.5 0]);
-
-%% --- Plot 2: Individual User Throughput ----------------------------------
-subplot(1, 2, 2);
-
-user_vals = [tp_ac_user(:), tp_ax_user(:)] / 1e6;   % N_USERS × 2
-
+% --- Plot 2: Individual User Throughput ---
+figure('Name','Individual_User_Throughput');
+user_vals = [tp_ac_user(:), tp_ax_user(:)] / 1e6;
 b2 = bar(1:N_USERS, user_vals, 0.72);
-b2(1).FaceColor = colors_ac;
-b2(2).FaceColor = colors_ax;
-
+b2(1).FaceColor = colors_ac; b2(2).FaceColor = colors_ax;
 set(gca, 'XTick', 1:N_USERS, 'XTickLabel', xlabels, 'FontSize', 9.5);
 ylabel('Throughput (Mbps)');
 title('Individual User Throughput');
-legend('802.11ac (TDMA)', '802.11ax (OFDMA)', 'Location','northwest');
-grid on; box on;
-
-% Value labels on each bar
-ngroups    = N_USERS;
-nbars      = 2;
-groupwidth = min(0.8, nbars/(nbars+1.5));
-for s = 1:nbars
-    xpos = (1:ngroups) - groupwidth/2 + (s-0.5)*groupwidth/nbars;
-    for u = 1:ngroups
-        v = user_vals(u, s);
-        text(xpos(u), v + max(user_vals(:))*0.02, sprintf('%.1f', v), ...
-            'HorizontalAlignment','center','FontSize',7.5);
-    end
-end
-
-sgtitle(sprintf('System-Level Sim  |  %s  |  CBW80  |  LDPC  |  %d Users', ...
-    delay_profile, N_USERS), 'FontWeight','bold');
-
+legend('802.11ac (TDMA)', '802.11ax (OFDMA)');
+grid on;
+saveas(gcf, 'figures/individual_user_throughput.png');
 %% =========================================================================
 %% LOCAL FUNCTIONS
 % =========================================================================
