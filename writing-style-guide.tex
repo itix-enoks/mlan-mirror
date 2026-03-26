@@ -1,0 +1,172 @@
+\documentclass[twocolumn]{article}
+\usepackage{graphicx}
+\usepackage[utf8]{inputenc}
+\usepackage[a4paper, margin=0.79in]{geometry}
+\usepackage{lastpage}
+\usepackage{hyperref}
+\usepackage[compact]{titlesec}
+\usepackage{tikz}
+\usepackage{float}
+\usepackage{listings}
+\usetikzlibrary{fit}
+\usepackage{seqsplit}
+
+\titleformat{\section}[hang]{\bfseries\large}{\thesection}{0.5em}{}
+\titleformat{\subsection}[hang]{\bfseries\normalsize}{\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}[runin]{\bfseries\normalsize}{\thesubsubsection}{0.5em}{}
+
+
+
+\title{\large{\textbf{Wireless IoT and LAN (CESE4060): Wireshark Report}}}
+\author{
+    \small Enes Kaya (5279003, ekaya) \and
+    \small Tobias Veselka (4451848, tobiasveselka1) \and
+    \footnotesize{Report contains \pageref{LastPage} of maximum 4 pages.}
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+
+
+\section{Introduction}
+This report details the research done to distinguish a user who just passes by a given access point, a passer-by, from a device remaining in the vicinity of the access point for a longer duration, labeled a lingerer. First, observations of the RSSI value of a device will be used to determine in which of the aforementioned categories the user falls. Then, it is investigated to what extent the frequency of 802.11 probe requests vary between transient and stationary devices, and whether this metric can also be used to distinguish a passer-by from a lingerer with equal certainty, cross-validating this with the RSSI packet-data.
+
+
+
+
+\section{Method}
+\label{sec:method}
+Detecting users and classifying them required two preliminary case studies, which will then be used to make the general classification and attempt to prove the same based on probe-request frequency of the users.
+
+The goal of the case study is to set the foundation for the main experiment and the subsequent cross-validation of the probe-request frequency with the RSSI-based user classification for the sniffed traffic. First, for the passer-by scenario, we started close to the sniffing location (which happened to be close to the AP) and walked along the corridor of the room, simulating a short excursion past fixed observation points. The maximum distance the devices were away from the access point was between 20 and 30 meters. \autoref{fig:drebbel} shows the room in which the experiments were performed. An important part of this experiment was to get an idea of the sensitivity range of the AP, to determine whether the location was fit for the experiments.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/drebbel.png}
+    \caption{Location of the performed experiments}
+    \label{fig:drebbel}
+\end{figure}
+
+The total capture window spans approximately 100 seconds, during which probe request frames from both mobile devices\footnote{See \autoref{sec:test_setup} for the full description of the test setup.} were specifically tracked. A longer sniffing of approximately an hour followed, and the data was analyzed to find a clear example of a user that could be classified as a lingerer, based on the RSSI data.
+
+After proving a lingerer can clearly be distinguished from a passer-by based on RSSI packet-data, all users of a longer capture period were classified. Labels are assigned by a rule-based classifier: a session is marked as \emph{linger} if its duration meets or exceeds 300s, or if it lasts at least 60\,s while maintaining a mean RSSI of -82dBm or better; all remaining sessions are marked as \emph{pass-by}. Each session is then plotted as a single point in the mean-RSSI vs session-duration plane. Then, the per-session 802.11 probe-request data was plotted, to determine whether the same classification could have been made based on probe-request frequency.
+
+Frames captured in monitor mode are prepended with a \emph{RadioTap} header, which exposes the PHY-layer metadata. RSSI was read from the \texttt{\seqsplit{radiotap.dbm\_antsignal}} field to capture the raw value, and timestamps were taken from the \texttt{frame.time\_epoch} field. Per-device \emph{sessions} were formed by grouping consecutive probe requests from the same source. If two successive frames are separated by more than 20\,s, a new session is recorded. Sessions of less than 3 frames are discarded as noise, and sessions from the same device within 900\,s of each other are merged into the same stay at the given location. The reason the latter was chosen is to balance user (in)activity and presence to the access point, to not discard a lingerer with almost no activity as a passer-by. RSSI outlier removal or smoothening was not applied; apart from erroneous data where the signal was set to 0 dBm.
+
+
+built in sniffer from apple from wireless diagnostics
+
+\subsection{Hypothesis}
+\label{subsec:hyp}
+
+We hypothesize that it will be able to classify users as passer-by or lingerer based on RSSI values, as this is user-side information, sent by the device to the AP, which is very path-dependent and is used to handle handovers - hence a reliable metric.
+
+With regards to the 802.11 probe-request packets, we expect that it will not be as easy to clearly distinguish between passer-by and lingerer because the initial connection is the same for both cases, and various external influences can disrupt the connection, causing frequent probe-requests.
+
+
+
+
+\section{Test setup}
+\label{sec:test_setup}
+The experiments were performed at building 35 at the TU Delft. The test setup consisted of two laptop and two mobile devices equipped with wireless network cards. The network cards of the laptops were set to \emph{monitor mode} to sniff wireless traffic.
+
+One of the laptops is equipped with an Intel Raptor Lake-S PCH CNVi WiFi network card. First, a tool called \texttt{\seqsplit{Aircrack-ng}} was used to determine on which channel the network interface was picking up wireless traffic. Depending on the location in the building, thus also on the access point, traffic on varying channels was detected. \texttt{Wireshark} was used to sniff, and \texttt{tshark} for post-processing and analyzing the generated pcap files.
+
+The other laptop, a mac, is equipped with a Broadcom BCM4388 Wi-Fi 6E (802.11ax) network card. Sniffing was done with the built in sniffer from apple from wireless diagnostics.
+
+Both of the wireless network interfaces of the laptops did not themselves associate with an access point, but were observers of the traffic sent to the nearby access point. The channel on which the sniffing took place near the access point of interest, was \textbf{channel 132}\footnote{5660\,MHz, 5\,GHz band, 802.11\,a/n/ac}. The closely observed MAC addresses were \texttt{\seqsplit{b2:da:67:a7:6e:69}} and \texttt{\seqsplit{be:7b:19:20:5e:87}}\footnote{Tobias Veselka and Enes Kaya respectively}, which are locally-administered MACs.
+
+For the case studies described in \autoref{subsec:case} below, a dozen of shorter measurements were taken, and for the multi-session dataset analysis of the subsequent section, several captures were generated in the range of one half to one hour in duration. Lastly, \texttt{python} and \texttt{tshark} were used to interpret and process the acquired data.
+
+
+
+\section{Results and Evaluation}
+
+\subsection{Case Studies}
+\label{subsec:case}
+
+In \autoref{fig:case1} the results of the first case study are depicted. As can be seen, both devices experience the strongest signal at the start and end of the measuring period, indicating the monitoring station was setup close the the AP. As the devices move further away from the AP, the link starts becoming less reliable. According to Montavont et al.\cite{handover-triggering}, this starts happening around the -70\,dBm mark. This is the reason we see that, between the 45 and 70 to 90 second mark, the devices connect to another AP, and only reconnect again when signal has become better. After reconnection, the signal of Enes's device increases and drops in signals strength, before increasing again as the monitoring station is approached. This is likely attributed to a fading dip or shadowing.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[trim= 40 0 40 0, clip, width=\linewidth]{figures/access_point_switch_walking_together.png}
+  \caption{ RSSI as a function of time. The straight lines represent a switch to a different access point.}
+  \label{fig:case1}
+\end{figure}
+
+The results of the second case study can be seen in \autoref{fig:case2} below. Among the devices present, a device with mac \texttt{\seqsplit{9a:4e:d9:34:66:d8}} was recorded for this case study. The recorded behavior clearly shows that the device had been kept at the same range from the monitoring station, strongly mimicking the behavior of a lingerer. As can be seen, the RSSI values stay within a range from roughly -40 to -60\,dBm.
+
+\begin{equation}
+    FSPL = \left( \frac{4\pi d}{\lambda} \right)^2
+    \label{eq:pathloss}
+\end{equation}
+
+The fact that no large differences can be seen between the lowest and highest values is because of constant path-loss experienced throughout the entire duration of the experiment. As shown in \autoref{eq:pathloss}, the free space path loss (FSPL) scales with the square of the distance to the AP, which further explains the large differences in the signal strength shown in \autoref{fig:case1}. Again, the fluctuation is attributed to a fading dip and shadowing.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[trim= 60 0 60 0, clip, width=\linewidth]{figures/lingerer_longest_session.jpg}
+  \caption{ RSSI as a function of time for the lingerer.}
+  \label{fig:case2}
+\end{figure}
+
+Taken together, the two case studies reveal that passer-by and lingerer events differ along at least three measurable dimensions, which can in turn be used to more accurately make the classification. First, the session duration is different. Setting a threshold of 300\,s of accumulated duration, or an ongoing session of more than 60/\,s will allow us to accurately separate the two. Then, RSSI trajectory shape is different, because the lingerer is more or less stationary, with constant path loss, in contrast to the passer-by who will experience different path-loss along its journey. Lastly, the current data suggests that one can conclude that the mean signal power of a lingerer is on average higher than that of a passer-by, provided the lingerer is not situated near the local cell-edge.
+
+
+
+\subsection{Classification over a Multi-Session Dataset}
+\label{subsec:classification}
+
+After proving a lingerer can clearly be distinguished from a passer-by based on RSSI packet-data, we turn to classifying the local users of the network connected to the nearby AP, to find out and cross-validate whether this can also be concluded from the probe-request packets. \autoref{fig:scatter} below shows the mean RSSI in dBm against session duration for both the lingerer and passer-by users.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[trim = 10 0 10 0, clip, width=\linewidth]{figures/session_classification.png}
+  \caption{Mean RSSI versus session duration for all captured sessions.}
+  \label{fig:scatter}
+\end{figure}
+
+It should come to no surprise that the AP saw more passer-by than lingerers. Anyone walking by near the window side of the building could have had a short session, whereas establishing oneself as a lingerer requires remaining in the same location for a substantially longer period of time.
+
+Both among the lingerers and the passer-by, mean RSSI values vary between -60 and -80\,dBm. Regarding the lingerers this is explained by the fact that different people sit at different locations across the hall. For the passer-by, this depends on two main factors: how close they pass by the AP, and how late they switch from one AP to the other. Depending on the signal strength they perceive from the previous AP and the direction they came from, the handover might be performed at a different perceived signal strength of the next AP that the device will connect to.
+
+As mentioned in \autoref{subsec:case}, the average mean RSSI of the lingerer devices is expected to be higher than that of the passer-by. This is however not very clearly visible from \autoref{fig:scatter}, where there is a high degree of parity between both groups. The average mean RSSI is in practice not sufficient to distinguish a lingerer from a passer-by even after correctly aggregating user sessions, as evidenced by the collected data, suggesting a similar spread is expected for both classes.
+
+The results with regards to the second part of our research question can be seen in \autoref{fig:probe-req_per_session} below. The relation between amount of probe-requests to session duration on a logarithmic scale are depicted. The absolute maximum probe-request frequency of the lingerer is only marginally higher than the minimum value of that of the passer-by users. The substantial difference is probe-request frequency does lead to the conclusion that this metric can be used to classify users based on the session duration.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[trim= 10 0 10 0, clip, width=\linewidth]{figures/probe_req_per_session.png}
+    \caption{Probe request frequency on a log scale for passer-by and lingerer}
+    \label{fig:probe-req_per_session}
+\end{figure}
+
+A lingerer does not have to search for a connection or start roaming as often when the device remains stationary, as the RSSI will only fluctuate because of fluctuating channel quality or shadowing, but not because of changing path loss. A loss of connection, high frame retry-rate or beacon loss would cause the device to initiate roaming again. These phenomena do not nearly occur as frequently as the changing signal strength of a user near the cell-edge which searches for the best signal strength. A passer-by on the other hand will experience drastically different link quality along its journey, causing the device to start roaming and sending probe-request packets.
+
+
+
+\subsection{Discussion}
+\label{sec:class:discussion}
+
+Looking at \autoref{fig:scatter}, one can see that the classification approach has been effective. Some of the passer-by instances have longer session duration than users classified as lingerers. This is however not necessarily an error. This is due to the two aforementioned rule-based classifiers regarding total duration and consecutive duration RSSI above a certain threshold (cf. \autoref{sec:method}). The passer-by with a session duration of more than 100\,s happened to be very active, but the total session did not last long enough to be classified as a lingerer, because it is not the total session time alone that determines this, but also the spread in time of the accumulated total. On the other hand, a lingerer with a very short session duration has likely been a very inactive user, who nonetheless remained for at least 15 minutes at the location or more.
+
+In \autoref{subsec:hyp}, we hypothesized that the probe-request frequency could not be used as a standalone metric to correctly classify a user as a lingerer or passer-by. \autoref{fig:probe-req_per_session} proves the contrary: only in a very rare case a lingerer would have a higher probe-request frequency than a passer-by.
+
+There are however limitations to the measurements and analysis performed. Because devices are only detected when active, it can occur that they are incorrectly classified. The collected data can give an indication of how many \emph{active} devices are lingering or passing by, but will not directly correspond to the amount of persons; some persons have several active devices, while other users have one or multiple inactive devices. Furthermore, IoT devices that belong to the building, and which show wireless activity, will also be classified, even though they are not directly of interest.
+
+\section{Conclusion}
+It has been demonstrated that through passive IEEE 802.11 sniffing, session-duration based classification and probe-request frequency can both be used to distinguish a lingerer from a passer-by connecting to an AP. Furthermore, it can be concluded that probe-request frequency is also an accurate metric for the classification.
+
+An improvement could be suggested for the rule-based classifiers. More and prolonged experiments could possibly reveal or make room for an even better threshold for this classification, as there can always be outliers. This will then decrease the possibility of incorrect classification. More measurements and experiments will also shed a better light on the conjecture made in \autoref{subsec:case}, that the average mean RSSI of a lingerer would be higher than that of a passer-by.
+
+\begin{thebibliography}{9}
+\bibitem{handover-triggering}
+    N.Montavont, \textit{et al.}, `Handover triggering in IEEE 802.11 networks,' \textit{\seqsplit{2015 IEEE 16th International Symposium on a World of Wireless, Mobile and Multimedia Networks (WoWMoM)}}, Boston, MA, USA, 2015, pp. 1--9, doi: 10.1109/WoWMoM.2015.7158126.
+
+\end{thebibliography}
+
+
+\end{document}
